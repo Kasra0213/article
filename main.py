@@ -1,38 +1,30 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 import requests
 from sentence_transformers import SentenceTransformer
-from transformers import pipeline
 from sklearn.metrics.pairwise import cosine_similarity
 import time
-from functools import lru_cache
 
 app = FastAPI(title="جستجوی هوشمند مقاله - جشنواره")
 
-# مدل embedding (دقت بالا + multilingual شامل فارسی)
-embed_model = SentenceTransformer('Qwen/Qwen3-Embedding-0.6B')
+# مدل سبک و سریع (برای جلوگیری از crash رم)
+embed_model = SentenceTransformer('all-MiniLM-L6-v2')
 
-# مدل خلاصه‌سازی (چندزبانه)
-summarizer = pipeline("summarization", model="facebook/mbart-large-50")
-
-# کش نتایج جستجو (تا ۱۰۰ مورد اخیر)
+# کش ساده
 cache = {}
 CACHE_LIMIT = 100
 
 class QueryRequest(BaseModel):
     query: str
 
-def search_wikipedia_titles(query: str, lang: str = "fa", max_results: int = 800):
-    """
-    جستجوی گسترده با pagination و srlimit بالا
-    """
+def search_wikipedia(query: str, lang: str = "fa", max_results: int = 300):
     url = f"https://{lang}.wikipedia.org/w/api.php"
     titles = []
-    continue_token = {}
+    cont = {}
 
     headers = {
-        'User-Agent': 'FestivalSemanticSearch/1.0 (k.sharafie@gmail.com)'  # ← ایمیل واقعی خودت را بگذار
+        'User-Agent': 'FestivalProject/1.0 (k.sharafie@gmail.com)'
     }
 
     while True:
@@ -41,10 +33,9 @@ def search_wikipedia_titles(query: str, lang: str = "fa", max_results: int = 800
             "format": "json",
             "list": "search",
             "srsearch": query,
-            "srwhat": "text",           # جستجو در متن مقاله → نتایج خیلی بیشتر
-            "srlimit": "500",           # حداکثر مجاز
-            "srprop": "snippet",
-            **continue_token
+            "srwhat": "text",
+            "srlimit": "50",
+            **cont
         }
 
         resp = requests.get(url, params=params, headers=headers).json()
@@ -54,72 +45,64 @@ def search_wikipedia_titles(query: str, lang: str = "fa", max_results: int = 800
             titles.extend(new_titles)
 
         if 'continue' in resp:
-            continue_token = resp['continue']
+            cont = resp['continue']
         else:
             break
 
-        time.sleep(0.6)  # تأخیر برای جلوگیری از بلاک شدن
+        time.sleep(0.5)
 
         if len(titles) >= max_results:
             break
 
-    return list(set(titles))[:max_results]  # حذف تکراری + محدود
+    return list(set(titles))[:max_results]
 
-def fetch_article_text(title: str, lang: str = "fa"):
+def get_text(title: str, lang: str):
     url = f"https://{lang}.wikipedia.org/w/api.php"
     params = {
         "action": "query",
         "format": "json",
         "prop": "extracts",
         "explaintext": True,
-        "exsentences": 10,          # فقط چند جمله اول برای سرعت
+        "exsentences": 8,
         "titles": title
     }
     resp = requests.get(url, params=params).json()
     pages = resp.get("query", {}).get("pages", {})
-    for page in pages.values():
-        return page.get("extract", "")
+    for p in pages.values():
+        return p.get("extract", "")
     return ""
 
-def summarize_text(text: str):
-    if len(text.strip()) < 50:
-        return text.strip() or "خلاصه موجود نیست."
-    try:
-        summary = summarizer(text[:1200], max_length=90, min_length=40, do_sample=False)[0]['summary_text']
-        return summary
-    except:
-        return text[:300] + "..."  # fallback
-
 @app.get("/", response_class=HTMLResponse)
-async def root():
+async def home():
     try:
         with open("index.html", "r", encoding="utf-8") as f:
             return f.read()
-    except FileNotFoundError:
-        return "<h1>فایل index.html پیدا نشد!</h1>"
+    except:
+        return "<h1>فایل index.html پیدا نشد</h1>"
+
+@app.get("/kaithhealth")
+async def health_check():
+    return {"status": "healthy"}
 
 @app.post("/search")
-def perform_search(req: QueryRequest):
+def search(req: QueryRequest):
     q = req.query.strip()
     if not q:
         return []
 
-    # کش
     if q in cache:
         return cache[q]
 
-    # جستجوی گسترده
-    fa_titles = search_wikipedia_titles(q, "fa", 800)
-    en_titles = search_wikipedia_titles(q, "en", 800)
+    fa_titles = search_wikipedia(q, "fa")
+    en_titles = search_wikipedia(q, "en")
 
-    # ترکیب + محدود به ۲۰-۳۰ مورد برتر برای embedding (سرعت مهم است)
-    combined = list(set(fa_titles[:15] + en_titles[:15]))
+    candidates = list(set(fa_titles[:10] + en_titles[:10]))
 
     results = []
 
-    for title in combined:
+    for title in candidates:
         lang = "fa" if title in fa_titles else "en"
-        text = fetch_article_text(title, lang)
+        text = get_text(title, lang)
         if not text:
             continue
 
@@ -129,32 +112,28 @@ def perform_search(req: QueryRequest):
         sim = cosine_similarity([q_emb], [t_emb])[0][0]
         percent = round(float(sim * 100), 2)
 
-        if percent > 82:
-            help_text = "بله – احتمالاً پاسخ کامل سوال شما در این مقاله است."
-        elif percent > 58:
-            help_text = "تا حد خوبی مرتبط است – بخش‌هایی از پاسخ را پوشش می‌دهد."
+        if percent > 75:
+            help_msg = "بله، احتمالاً پاسخ کامل دارد."
+        elif percent > 50:
+            help_msg = "تا حد خوبی مرتبط است."
         else:
-            help_text = "ارتباط کم – بهتر است منابع دیگری هم بررسی کنید."
+            help_msg = "ارتباط کم – منابع دیگر را هم چک کنید."
 
-        summary = summarize_text(text)
+        summary = text[:250] + "..." if text else "خلاصه موجود نیست."
 
         results.append({
             "title": title,
             "percent": percent,
-            "help": help_text,
+            "help": help_msg,
             "summary": summary,
             "url": f"https://{lang}.wikipedia.org/wiki/{title.replace(' ', '_')}",
             "lang": lang.upper()
         })
 
-    # مرتب‌سازی descending + فقط ۵ مورد برتر
-    top5 = sorted(results, key=lambda x: x["percent"], reverse=True)[:5]
+    top = sorted(results, key=lambda x: x["percent"], reverse=True)[:5]
 
-    # ذخیره در کش
     if len(cache) >= CACHE_LIMIT:
-        oldest = next(iter(cache))
-        del cache[oldest]
-    cache[q] = top5
+        cache.pop(next(iter(cache)), None)
+    cache[q] = top
 
-
-    return top5
+    return top
