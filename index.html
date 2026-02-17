@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>جستجوی هوشمند مقاله – جشنواره</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: linear-gradient(to bottom, #f0f4f8, #d9e2ec);
+      margin: 0;
+      padding: 40px 20px;
+      color: #333;
+      text-align: center;
+    }
+    h1 { color: #1a3c6d; margin-bottom: 20px; }
+    .container { max-width: 820px; margin: 0 auto; }
+    input {
+      width: 100%; max-width: 500px;
+      padding: 14px;
+      font-size: 1.1rem;
+      border: 2px solid #ccc;
+      border-radius: 8px;
+      margin-bottom: 15px;
+    }
+    button {
+      padding: 14px 32px;
+      font-size: 1.1rem;
+      background: #1a73e8;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button:hover { background: #0d5bd9; }
+    #results { margin-top: 40px; text-align: right; }
+    .card {
+      background: white;
+      border-radius: 10px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+      padding: 20px;
+      margin: 16px 0;
+      border-top: 4px solid #1a73e8;
+    }
+    .title a { color: #1a3c6d; text-decoration: none; font-weight: bold; font-size: 1.3rem; }
+    .title a:hover { text-decoration: underline; }
+    .percent { color: #2e7d32; font-weight: bold; font-size: 1.2rem; }
+    .help { color: #e65100; font-style: italic; }
+    .summary { color: #555; line-height: 1.6; margin-top: 10px; }
+    .lang-badge {
+      background: #e0e0e0;
+      color: #333;
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 0.85rem;
+      margin-left: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>جستجوی هوشمند مقاله با هوش مصنوعی</h1>
+    <input type="text" id="query" placeholder="سوال یا موضوع خود را وارد کنید..." />
+    <button onclick="doSearch()">جستجو</button>
+
+    <div id="results"></div>
+  </div>
+
+  <script>
+    async function doSearch() {
+      const q = document.getElementById("query").value.trim();
+      if (!q) return;
+
+      const resDiv = document.getElementById("results");
+      resDiv.innerHTML = "<p style='color:#666;'>در حال جستجو و پردازش ...</p>";
+
+      try {
+        const resp = await fetch("/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: q })
+        });
+
+        if (!resp.ok) throw new Error("خطا در ارتباط با سرور");
+
+        const data = await resp.json();
+
+        if (data.length === 0) {
+          resDiv.innerHTML = "<p style='color:#c62828;'>هیچ مقاله مرتبطی یافت نشد. سوال را دقیق‌تر کنید.</p>";
+          return;
+        }
+
+        let html = "";
+        data.forEach(item => {
+          html += `
+            <div class="card">
+              <div class="title">
+                <a href="${item.url}" target="_blank">${item.title}</a>
+                <span class="lang-badge">${item.lang}</span>
+              </div>
+              <p class="percent">شباهت معنایی: ${item.percent}%</p>
+              <p class="help">${item.help}</p>
+              <p class="summary"><strong>خلاصه:</strong> ${item.summary}</p>
+            </div>
+          `;
+        });
+
+        resDiv.innerHTML = html;
+      } catch (err) {
+        resDiv.innerHTML = `<p style='color:#c62828;'>خطا: ${err.message}</p>`;
+      }
+    }
+  </script>
+</body>
+</html>
