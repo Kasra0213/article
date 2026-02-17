@@ -32,7 +32,7 @@ def search_wikipedia_titles(query: str, lang: str = "fa", max_results: int = 800
     continue_token = {}
 
     headers = {
-        'User-Agent': 'FestivalSemanticSearch/1.0 (yourname@example.com)'  # ← ایمیل واقعی خودت را بگذار
+        'User-Agent': 'FestivalSemanticSearch/1.0 (k.sharafie@gmail.com)'  # ← ایمیل واقعی خودت را بگذار
     }
 
     while True:
@@ -155,5 +155,6 @@ def perform_search(req: QueryRequest):
         oldest = next(iter(cache))
         del cache[oldest]
     cache[q] = top5
+
 
     return top5
