@@ -137,3 +137,4 @@ def search(req: QueryRequest):
     cache[q] = top
 
     return top
+
